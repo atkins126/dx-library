@@ -5,24 +5,49 @@ interface
 uses
   System.Classes, System.SysUtils;
 
-procedure OpenBrowser(const AUrl: string);
+type
+  TVersionData = record
+    CompanyName, FileDescription, FileVersion, InternalName, LegalCopyright, LegalTrademarks, OriginalFileName,
+      ProductName, ProductVersion, Comments, PrivateBuild, SpecialBuild: string;
+  end;
+
+procedure OpenBrowser(const AUrl: string; AActivate: boolean = true);
 
 function GetExeBuildTimestamp: TDateTime;
 
-function GetExeVersion(const AFormat: string = '%d.%d.%d.%d'): String; overload;
-function GetExeVersion(
-  const AFilename: string;
-  const AFormat:   string): String; overload;
+/// <Summary>
+/// Retrieves the version number from the current process, using a format string.
+/// The format strings accepts up to four version parts. Eg:
+/// %d.%d.%d.%d = 1.2.3.4
+/// %d.%d = 1.2
+/// </Summary>
+function GetExeVersionFmt(const AFormat: string): String; overload;
 
-function ExecuteProcess(
-  const AFilename, AParams: string;
-  AFolder:                  string;
-  AWaitUntilTerminated:     boolean;
-  var ExitCode:             integer): boolean;
+/// <Summary>
+/// Retrieves the version number from the given file, using a format string.
+/// The format strings accepts up to four version parts. Eg:
+/// %d.%d.%d.%d = 1.2.3.4
+/// %d.%d = 1.2
+/// </Summary>
+function GetExeVersionFmt(const AFilename: string; const AFormat: string): String; overload;
 
-function ExecuteCommand(
-  ACommandLine: string;
-  AWork:        string = 'C:\'): string;
+/// <Summary>
+/// Retrieves the version number from the current process.
+/// </Summary>
+function GetExeVersion: String; overload;
+
+/// <Summary>
+/// Retrieves the version number from the given file.
+/// </Summary>
+function GetExeVersion(const AFilename: string): String; overload;
+
+function ExecuteProcess(const AFilename, AParams: string; AFolder: string; AWaitUntilTerminated: boolean;
+  var ExitCode: integer): boolean;
+
+function GetExeVersionData: TVersionData; overload;
+function GetExeVersionData(const AFilename: string): TVersionData; overload;
+
+function ExecuteCommand(ACommandLine: string; AWork: string = 'C:\'): string;
 
 implementation
 
@@ -30,11 +55,8 @@ uses
   System.DateUtils, System.IOUtils,
   Winapi.Windows, Winapi.ShellAPI;
 
-function ExecuteProcess(
-  const AFilename, AParams: string;
-  AFolder:                  string;
-  AWaitUntilTerminated:     boolean;
-  var ExitCode:             integer): boolean;
+function ExecuteProcess(const AFilename, AParams: string; AFolder: string; AWaitUntilTerminated: boolean;
+  var ExitCode: integer): boolean;
 var
   LCmdLine: string;
   LWorkingDir: PChar;
@@ -75,9 +97,7 @@ begin
   end;
 end;
 
-function ExecuteCommand(
-  ACommandLine: string;
-  AWork:        string = 'C:\'): string;
+function ExecuteCommand(ACommandLine: string; AWork: string = 'C:\'): string;
 var
   LSecurityAttributes: TSecurityAttributes;
   LStartupInfo: TStartupInfo;
@@ -104,9 +124,8 @@ begin
     LStartupInfo.hStdError := StdOutPipeWrite;
 
     LWorkDir := AWork;
-    LHandle := CreateProcess(nil, PChar('cmd.exe /C ' + ACommandLine),
-      nil, nil, true, 0, nil,
-      PChar(LWorkDir), LStartupInfo, LProcessInfo);
+    LHandle := CreateProcess(nil, PChar('cmd.exe /C ' + ACommandLine), nil, nil, true, 0, nil, PChar(LWorkDir),
+      LStartupInfo, LProcessInfo);
     CloseHandle(StdOutPipeWrite);
     if LHandle then
       try
@@ -130,9 +149,15 @@ begin
   end;
 end;
 
-procedure OpenBrowser(const AUrl: string);
+procedure OpenBrowser(const AUrl: string; AActivate: boolean = true);
 begin
-  ShellExecute(0, nil, PChar(AUrl), nil, nil, SW_SHOWNOACTIVATE);
+  var
+  LMode := SW_SHOWNORMAL;
+  if not AActivate then
+  begin
+    LMode := SW_SHOWNOACTIVATE;
+  end;
+  ShellExecute(0, nil, PChar(AUrl), nil, nil, LMode);
 end;
 
 function GetExeBuildTimestamp: TDateTime;
@@ -144,17 +169,25 @@ begin
   result := TTimeZone.Local.ToLocalTime(LTimeStampUTC);
 end;
 
-function GetExeVersion(const AFormat: string = '%d.%d.%d.%d'): String;
+function GetExeVersion: String; overload;
+begin
+  result := GetExeVersion(ParamStr(0));
+end;
+
+function GetExeVersion(const AFilename: string): String; overload;
+begin
+  result := GetExeVersionFmt(AFilename, '%d.%d.%d.%d');
+end;
+
+function GetExeVersionFmt(const AFormat: string): String;
 var
   LExeFilename: string;
 begin
   LExeFilename := ParamStr(0);
-  result := GetExeVersion(LExeFilename, AFormat);
+  result := GetExeVersionFmt(LExeFilename, AFormat);
 end;
 
-function GetExeVersion(
-  const AFilename: string;
-  const AFormat:   string): String;
+function GetExeVersionFmt(const AFilename: string; const AFormat: string): String;
 var
 
   LVersionInfoSize: DWORD;
@@ -179,7 +212,6 @@ begin
     try
       GetFileVersionInfo(PChar(LFilename), 0, LVersionInfoSize, LBuffer);
       VerQueryValue(LBuffer, '\', LFileInfo, LHandle);
-
       LVersionInfo[1] := HiWord(PVSFixedFileInfo(LFileInfo)^.dwFileVersionMS);
       LVersionInfo[2] := LoWord(PVSFixedFileInfo(LFileInfo)^.dwFileVersionMS);
       LVersionInfo[3] := HiWord(PVSFixedFileInfo(LFileInfo)^.dwFileVersionLS);
@@ -190,10 +222,72 @@ begin
     if AFormat = '' then
     begin
       LFormat := '%d.%d.%d.%d';
-    end else begin
+    end
+    else
+    begin
       LFormat := AFormat;
     end;
     result := Format(LFormat, [LVersionInfo[1], LVersionInfo[2], LVersionInfo[3], LVersionInfo[4]]);
+  end;
+end;
+
+function GetExeVersionData: TVersionData;
+begin
+  result := GetExeVersionData(ParamStr(0));
+end;
+
+function GetExeVersionData(const AFilename: string): TVersionData;
+
+  function Query(ABuffer: Pointer; const ALanguage: string; AFieldName: string): String;
+  var
+    LQueryResult: Pointer;
+    LVerinfoLen: Cardinal;
+  begin
+    if VerQueryValue(ABuffer, PChar('\StringFileInfo\' + ALanguage + '\' + AFieldName), LQueryResult, LVerinfoLen) then
+      result := PChar(LQueryResult)
+    else
+      result := '';
+  end;
+
+type
+  PLandCodepage = ^TLandCodepage;
+
+  TLandCodepage = record
+    wLanguage, wCodePage: Word;
+  end;
+var
+  LHandle: Cardinal;
+  LVerinfoLen: Cardinal;
+  LBuffer, LQueryResult: Pointer;
+  LLanguage: string;
+begin
+  LVerinfoLen := GetFileVersionInfoSize(PChar(AFilename), LHandle);
+  if LVerinfoLen = 0 then
+    RaiseLastOSError;
+  GetMem(LBuffer, LVerinfoLen);
+  try
+    if not GetFileVersionInfo(PChar(AFilename), 0, LVerinfoLen, LBuffer) then
+      RaiseLastOSError;
+
+    if not VerQueryValue(LBuffer, '\VarFileInfo\Translation\', LQueryResult, LVerinfoLen) then
+      RaiseLastOSError;
+
+    LLanguage := Format('%.4x%.4x', [PLandCodepage(LQueryResult)^.wLanguage, PLandCodepage(LQueryResult)^.wCodePage]);
+
+    result.CompanyName := Query(LBuffer, LLanguage, 'CompanyName');
+    result.FileDescription := Query(LBuffer, LLanguage, 'FileDescription');
+    result.FileVersion := Query(LBuffer, LLanguage, 'FileVersion');
+    result.InternalName := Query(LBuffer, LLanguage, 'InternalName');
+    result.LegalCopyright := Query(LBuffer, LLanguage, 'LegalCopyright');
+    result.LegalTrademarks := Query(LBuffer, LLanguage, 'LegalTrademarks');
+    result.OriginalFileName := Query(LBuffer, LLanguage, 'OriginalFileName');
+    result.ProductName := Query(LBuffer, LLanguage, 'ProductName');
+    result.ProductVersion := Query(LBuffer, LLanguage, 'ProductVersion');
+    result.Comments := Query(LBuffer, LLanguage, 'Comments');
+    result.PrivateBuild := Query(LBuffer, LLanguage, 'PrivateBuild');
+    result.SpecialBuild := Query(LBuffer, LLanguage, 'SpecialBuild');
+  finally
+    FreeMem(LBuffer);
   end;
 end;
 
