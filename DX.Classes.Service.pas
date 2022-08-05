@@ -9,6 +9,8 @@ uses
 
 type
 
+  TService = VCl.SvcMgr.TService;
+
   /// <summary>
   /// Allows to register a dscription for a TService
   /// </summary>
@@ -57,8 +59,10 @@ implementation
 
 {$R *.DFM}
 
+
 uses
-  MACS.Classes.Logger, System.Win.Registry, Winapi.Windows, DX.Utils.Windows, System.UITypes;
+  System.Win.Registry, Winapi.Windows,
+  DX.Utils.Logger, DX.Utils.Windows, System.UITypes;
 
 procedure ServiceController(CtrlCode: DWord); stdcall;
 begin
