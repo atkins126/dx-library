@@ -25,6 +25,8 @@ type
     FLogProc: TProc<string>;
     FBaseURL: string;
     FLogItems: TLogItems;
+    FLogRequestProc: TProc<THttpServerRequest>;
+    FLogResponseProc: TProc<THttpServerResponse>;
   protected
     procedure HandleRequest(
       const ABaseUri: string;
@@ -33,11 +35,14 @@ type
     procedure LogRequest(ARequest: THttpServerRequest);
     procedure LogResponse(AResponse: THttpServerResponse);
     procedure SetLogProc(ALogProc: TProc<string>);
-
+    procedure SetLogRequestProc(const Value: TProc<THttpServerRequest>);
+    procedure SetLogResponseProc(const Value: TProc<THttpServerResponse>);
   public
     constructor Create(const AURL: string); reintroduce;
     property BaseURL: string read FBaseURL;
     property LogProc: TProc<string> read FLogProc write SetLogProc;
+    property LogRequestProc: TProc<THttpServerRequest> read FLogRequestProc write SetLogRequestProc;
+    property LogResponseProc: TProc<THttpServerResponse> read FLogResponseProc write SetLogResponseProc;
     property LogItems: TLogItems read FLogItems write FLogItems;
   end;
 
@@ -112,7 +117,7 @@ type
     // Used to cache response information, until the response gets finally constructed and sent
     FResponseCache: THttpSysResponseCache;
     function GetDateVariable(Index: Integer): TDateTime; override;
-    function GetIntegerVariable(Index: Integer): Integer; override;
+    function GetIntegerVariable(Index: Integer): Int64; override;
     function GetRawContent: TBytes; override;
     function GetRawPathInfo: string; override;
     function GetRemoteIP: string; override;
@@ -141,9 +146,11 @@ type
   protected
     FContentType: string;
     FSent: boolean;
+    FLogMessage: String;
     function GetContent: string; override;
     function GetDateVariable(Index: Integer): TDateTime; override;
-    function GetIntegerVariable(Index: Integer): Integer; override;
+    function GetIntegerVariable(Index: Integer): Int64; override;
+    function GetLogMessage: string; override;
     function GetStatusCode: Integer; override;
     function GetStringVariable(Index: Integer): string; override;
     procedure MoveCookies;
@@ -154,12 +161,13 @@ type
       const Value: TDateTime); override;
     procedure SetIntegerVariable(
       Index: Integer;
-      Value: Integer); override;
+      Value: Int64); override;
     procedure SetStatusCode(AValue: Integer); override;
     procedure SetStringVariable(
       Index: Integer;
       const Value: string); override;
     procedure SetCurrentResponseContent(AStream: TStream); overload;
+    procedure SetLogMessage(const Value: String); override;
   public
     constructor Create(AHttpRequest: TSparkleRequest);
     procedure SendRedirect(const AURI: string); override;
@@ -175,7 +183,7 @@ uses
   System.Rtti, System.NetEncoding,
 
   Sparkle.HttpServer.Module, Sparkle.URI, Sparkle.Middleware.Compress,
-  DX.Sparkle.Utils;
+  DX.Sparkle.Utils, DX.Utils.Logger;
 
 resourcestring
   RSHSWBInvalidVarIndex = 'Invalid Variable Index: %d';
@@ -233,7 +241,6 @@ const
 
 threadvar FCurrentResponseContent: string;
 
-
 function SparkleWebBrokerBridgeRequestHandler: TWebRequestHandler;
 begin
   result := TSparkleWebBrokerBridgeRequestHandler.Instance;
@@ -285,6 +292,14 @@ var
   LModule: TAnonymousServerModule;
 begin
   inherited Create;
+  FLogProc := nil;
+  FLogRequestProc := nil;
+  FLogResponseProc := nil;
+{$IFDEF DEBUG}
+  FLogItems := [TLogItem.Request, TLogItem.Response];
+{$ELSE}
+  FLogItems := [];
+{$ENDIF}
   FBaseURL := AURL;
   LModule := TAnonymousServerModule.Create(AURL,
     procedure(const AContext: THttpServerContext)
@@ -314,7 +329,7 @@ end;
 
 procedure TSparkleWebBrokerBridge.HandleRequest(
   const ABaseUri: string;
-  ARequestContext: THttpServerContext);
+ARequestContext: THttpServerContext);
 var
   LBaseURL: TUri;
 begin
@@ -332,12 +347,20 @@ begin
   if Assigned(FLogProc) then
   begin
     FLogProc(AMessage);
+  end
+  else
+  begin
+    DXLog(AMessage);
   end;
 end;
 
 procedure TSparkleWebBrokerBridge.LogRequest(ARequest: THttpServerRequest);
 begin
-  if TLogItem.Request in LogItems then
+  if Assigned(FLogRequestProc) then
+  begin
+    FLogRequestProc(ARequest);
+  end
+  else if TLogItem.Request in LogItems then
   begin
     Log('Request URL: ' + ARequest.URI.OriginalUri);
     Log('Request Remote IP: ' + ARequest.RemoteIp);
@@ -348,7 +371,11 @@ end;
 
 procedure TSparkleWebBrokerBridge.LogResponse(AResponse: THttpServerResponse);
 begin
-  if TLogItem.Response in LogItems then
+  if Assigned(FLogResponseProc) then
+  begin
+    FLogResponseProc(AResponse);
+  end
+  else if TLogItem.Response in LogItems then
   begin
     Log('Response Status: ' + AResponse.StatusCode.ToString);
     Log('Response Headers: ' + AResponse.Headers.RawWideHeaders.Replace(#13#10, ' || '));
@@ -361,6 +388,16 @@ begin
   FLogProc := ALogProc;
   // Default: set all log items
   FLogItems := [TLogItem.Request, TLogItem.Response];
+end;
+
+procedure TSparkleWebBrokerBridge.SetLogRequestProc(const Value: TProc<THttpServerRequest>);
+begin
+  FLogRequestProc := Value;
+end;
+
+procedure TSparkleWebBrokerBridge.SetLogResponseProc(const Value: TProc<THttpServerResponse>);
+begin
+  FLogResponseProc := Value;
 end;
 
 { THTTPRequest }
@@ -442,7 +479,7 @@ begin
   result := result.Trim;
 end;
 
-function TSparkleRequest.GetIntegerVariable(Index: Integer): Integer;
+function TSparkleRequest.GetIntegerVariable(Index: Integer): Int64;
 begin
   result := StrToIntDef(string(GetStringVariable(Index)), -1)
 end;
@@ -556,7 +593,7 @@ end;
 
 function TSparkleRequest.ReadClient(
   var Buffer;
-  Count: Integer): Integer;
+Count: Integer): Integer;
 begin
   raise ENotImplemented.Create('Not implemented');
   // result := FRawContent.Read(Buffer, Count);
@@ -575,7 +612,7 @@ end;
 
 function TSparkleRequest.WriteClient(
   var ABuffer;
-  ACount: Integer): Integer;
+ACount: Integer): Integer;
 var
   LBuffer: TBytes;
 begin
@@ -586,7 +623,7 @@ end;
 
 function TSparkleRequest.WriteHeaders(
   StatusCode: Integer;
-  const ReasonString, Headers: string): boolean;
+const ReasonString, Headers: string): boolean;
 begin
   // Writing to internal response cache
   FResponseCache.Headers.Add(Headers);
@@ -638,7 +675,7 @@ begin
 
 end;
 
-function TSparkleResponse.GetIntegerVariable(Index: Integer): Integer;
+function TSparkleResponse.GetIntegerVariable(Index: Integer): Int64;
 begin
   case Index of
     INDEX_RESP_ContentLength:
@@ -646,6 +683,11 @@ begin
   else
     raise ESWBInvalidVarIndex.Create(Format(RSHSWBInvalidVarIndex, [Index]));
   end;
+end;
+
+function TSparkleResponse.GetLogMessage: string;
+begin
+  result := FLogMessage;
 end;
 
 function TSparkleResponse.GetRequest: TSparkleRequest;
@@ -699,9 +741,9 @@ var
 begin
   if Assigned(AStream) then
   begin
-     SetLength(LStreamBytes, AStream.Size);
-     AStream.Position := 0;
-     AStream.Read(LStreamBytes, AStream.Size);
+    SetLength(LStreamBytes, AStream.Size);
+    AStream.Position := 0;
+    AStream.Read(LStreamBytes, AStream.Size);
     FCurrentResponseContent := TEncoding.UTF8.GetString(LStreamBytes);
   end;
 end;
@@ -790,7 +832,7 @@ end;
 
 procedure TSparkleResponse.SetDateVariable(
   Index: Integer;
-  const Value: TDateTime);
+const Value: TDateTime);
 begin
   // Dates should be passed in as GMT!
   case Index of
@@ -805,7 +847,7 @@ begin
   end;
 end;
 
-procedure TSparkleResponse.SetIntegerVariable(Index, Value: Integer);
+procedure TSparkleResponse.SetIntegerVariable(Index: Integer; Value: Int64);
 begin
   case Index of
     INDEX_RESP_ContentLength:
@@ -815,6 +857,11 @@ begin
   end;
 end;
 
+procedure TSparkleResponse.SetLogMessage(const Value: String);
+begin
+  FLogMessage := Value;
+end;
+
 procedure TSparkleResponse.SetStatusCode(AValue: Integer);
 begin
   Request.FResponseCache.StatusCode := AValue;
@@ -822,7 +869,7 @@ end;
 
 procedure TSparkleResponse.SetStringVariable(
   Index: Integer;
-  const Value: string);
+const Value: string);
 var
   LValue: string;
 begin
