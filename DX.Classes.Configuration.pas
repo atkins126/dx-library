@@ -16,11 +16,15 @@ Type
   end;
 
   TConfigEntry = record
+  private
+    function GetKey: string;
+  public
     Name: string;
     Description: StringList;
     Section: string;
     Default: string;
     IsEncrypted: Boolean;
+    property Key: string read GetKey;
     procedure AssignDescription(AProperty: TRttiProperty);
     constructor Create(const AName: string);
   end;
@@ -31,6 +35,11 @@ Type
   end;
 
   TConfigRegistry = class(TSingleton<TConfigItems>)
+  end;
+
+  ConfigDirectoryAttribute = class(StringValueAttribute)
+  public
+    constructor Create(const ADirectory: string);
   end;
 
   ConfigFileAttribute = class(StringValueAttribute)
@@ -110,7 +119,8 @@ Type
   public
     constructor Create;
     destructor Destroy; override;
-    procedure WriteStorage;
+    procedure WriteStorage; deprecated 'Use method Save()';
+    procedure Save;
     property EncryptionKey: string write FEncryptionKey;
     property Filename: string read FStorageFile;
     property Encoding: TEncoding read GetEncoding write SetEncoding;
@@ -145,20 +155,42 @@ constructor TConfigurationManager<T>.Create;
 var
   LContent: TBytes;
   LEncoding: TEncoding;
+  LConfigDirectory: string;
 begin
   inherited;
   LEncoding := nil;
   FEncryptionKey := 'DeveloperExperts2020';
 
+  // ConfigFile given?
   if self.HasAttribute(ConfigFileAttribute) then
   begin
     FStorageFile := self.AttributeValue(ConfigFileAttribute);
   end
   else
   begin
+    // Default: AppName.ini
     FStorageFile := TPath.GetFileNameWithoutExtension(ParamStr(0)) + '.ini';
   end;
-  FStorageFile := TPath.Combine(TPath.GetLibraryPath, FStorageFile);
+
+  // ConfigDirectory given?
+  if self.HasAttribute(ConfigDirectoryAttribute) then
+  begin
+    LConfigDirectory := self.AttributeValue(ConfigDirectoryAttribute);
+  end
+  else
+  begin
+    // Full path given in ConfigFile?
+    LConfigDirectory := TPath.GetDirectoryName(FStorageFile);
+  end;
+
+  if not TDirectory.Exists(LConfigDirectory) then
+  begin
+    LConfigDirectory := TPath.GetLibraryPath;
+  end;
+
+  Assert(TDirectory.Exists(LConfigDirectory));
+
+  FStorageFile := TPath.Combine(LConfigDirectory, TPath.GetFileName(FStorageFile));
 
   if TFile.Exists(FStorageFile) then
   begin
@@ -245,7 +277,7 @@ begin
   end;
   if FStorage.Modified then
   begin
-    WriteStorage;
+    Save;
   end;
 end;
 
@@ -302,6 +334,12 @@ begin
       FreeAndNil(LCipher);
     end;
   end;
+end;
+
+procedure TConfigurationManager<T>.Save;
+begin
+  FStorage.UpdateFile;
+  WriteDescription;
 end;
 
 procedure TConfigurationManager<T>.SetConfigValueForProperty(
@@ -380,8 +418,7 @@ end;
 
 procedure TConfigurationManager<T>.WriteStorage;
 begin
-  FStorage.UpdateFile;
-  WriteDescription;
+  Save;
 end;
 
 procedure TConfigurationManager<T>.WriteDescription;
@@ -478,6 +515,11 @@ begin
   Section := '';
 end;
 
+function TConfigEntry.GetKey: string;
+begin
+  result := Section.Trim.ToLower + '/' + Name.Trim.ToLower;
+end;
+
 { ConfigFileAttribute }
 
 constructor ConfigFileAttribute.Create(const AFilename: string);
@@ -506,6 +548,13 @@ end;
 procedure TIniFileHelper.WriteDefault(const Section, Ident: string; Value: Integer);
 begin
   WriteDefault(Section, Ident, Value.ToString);
+end;
+
+{ ConfigDirectoryAttribute }
+
+constructor ConfigDirectoryAttribute.Create(const ADirectory: string);
+begin
+  Inherited Create(ADirectory);
 end;
 
 end.
