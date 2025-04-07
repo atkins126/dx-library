@@ -1,4 +1,4 @@
-unit DX.Classes.Service;
+ï»¿unit DX.Classes.Service;
 
 interface
 
@@ -9,7 +9,7 @@ uses
 
 type
 
-  TService = VCl.SvcMgr.TService;
+  TService = Vcl.SvcMgr.TService;
 
   /// <summary>
   /// Allows to register a dscription for a TService
@@ -30,7 +30,7 @@ type
     class var FDisplayName: string;
     class var FDescription: string;
     class var FServiceInstance: TServiceBase;
-  strict private
+  strict protected
     class procedure LogService(const AMessage: string);
     class procedure DisplayError(const AMessage: string);
     class function FindSwitch(const ASwitchName: string): Boolean;
@@ -52,17 +52,17 @@ type
     /// </summary>
     class procedure RegisterService(const AServiceName: string = '');
 
-    class procedure Run;
+    class procedure Run(const AServiceRunProc: TProc<TServiceBase> = nil);
   end;
 
 implementation
 
 {$R *.DFM}
 
-
 uses
-  System.Win.Registry, Winapi.Windows,
-  DX.Utils.Logger, DX.Utils.Windows, System.UITypes;
+  System.Win.Registry, System.UITypes,
+  Winapi.Windows,
+  DX.Utils.Logger.Intf, DX.Utils.Windows;
 
 procedure ServiceController(CtrlCode: DWord); stdcall;
 begin
@@ -101,14 +101,14 @@ begin
   Assert(FName > '', 'VersionInfo.InternalName is empty!');
   Assert(FDisplayName > '', 'VersionInfo.DisplayName is empty!');
   Assert(FDescription > '', 'VersionInfo.FileDescription is empty!')
-  // Properties are assigned in OnCreate and AfterInstall
+    // Properties are assigned in OnCreate and AfterInstall
 end;
 
 procedure TServiceBase.ServiceCreate(Sender: TObject);
 begin
   Name := FName;
   DisplayName := FDisplayName
-  // Description is set in AfterInstall
+    // Description is set in AfterInstall
 end;
 
 class procedure TServiceBase.DisplayError(const AMessage: string);
@@ -146,27 +146,27 @@ end;
 
 class procedure TServiceBase.LogService(const AMessage: string);
 begin
-  Log('[SERVICE] %s %s', [FDisplayName, AMessage]);
+  DXLog('[SERVICE] %s %s', [FDisplayName, AMessage]);
 end;
 
 class procedure TServiceBase.RegisterService(const AServiceName: string = '');
 begin
   // Hier wird:
   // -der Parameter "-service" gesetzt, um den Prozess als Service zu starten
-  // -die Beschreibung gesetzt, was über VCL.SvcMgr nicht möglich ist
+  // -die Beschreibung gesetzt, was ï¿½ber VCL.SvcMgr nicht mï¿½glich ist
   var
   LServiceName := AServiceName;
   if LServiceName = '' then
     LServiceName := FName;
   Assert(LServiceName > '', 'ServiceName has not been configured / is empty!');
   try
-    RegisterDescription(FDescription, AServiceName);
+    RegisterDescription(FDescription, LServiceName);
   except
     raise Exception.Create('Service could not be registered. Run as Administrator!');
   end;
 end;
 
-class procedure TServiceBase.Run;
+class procedure TServiceBase.Run(const AServiceRunProc: TProc<TServiceBase> = nil);
 begin
   try
     if Application.Installing then
@@ -190,9 +190,21 @@ begin
     else
     begin
       LogService('Starting service instance...');
-      Application.Run;
+      try
+        if Assigned(AServiceRunProc) then
+        begin
+          AServiceRunProc(FServiceInstance);
+        end;
+        Application.Run;
+      except
+        on E: Exception do
+        begin
+          LogService('Starting service instance failed: ' + E.Message);
+          raise;
+        end;
+      end;
     end;
-  Except
+  except
     on E: Exception do
     begin
       LogService('ERROR: ' + E.Message);
@@ -220,3 +232,4 @@ begin
 end;
 
 end.
+
